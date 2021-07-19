@@ -1,0 +1,84 @@
+from azure.storage.blob import (
+    BlockBlobService,
+    ContainerPermissions
+)
+from datetime import datetime, timedelta
+from decouple import config
+import requests
+
+# Values to generate OAuth token
+azure_client_id = config('azure_client_id')
+azure_secret = config('azure_secret')
+azure_subscription_id = config('azure_subscription_id')
+azure_tenant = config('azure_tenant')
+
+# Values to get Blob data
+resourceGroupName = config('resourceGroupName')
+serverName = config('serverName')
+
+# ixnamsdev database values
+databaseName_ix = config('databaseName_ix')
+account_name_ix = config('account_name_ix')
+account_key_ix = config('account_key_ix')
+CONTAINER_NAME_ix = config('CONTAINER_NAME_ix')
+
+# namsplus database values
+databaseName_nams = config('databaseName_nams')
+account_name_nams = config('account_name_nams')
+account_key_nams = config('account_key_nams')
+CONTAINER_NAME_nams = config('CONTAINER_NAME_nams')
+
+resourceGroupName_prod_test = config('resourceGroupName_prod_test')
+
+# Prod database values
+serverName_prod = config('serverName_prod')
+databaseName_prod = config('databaseName_prod')
+account_name_prod = config('account_name_prod')
+account_key_prod = config('account_key_prod')
+CONTAINER_NAME_prod = config('CONTAINER_NAME_prod')
+
+# Test db values
+serverName_test = config('serverName_test')
+databaseName_test = config('databaseName_test')
+account_name_test = config('account_name_test')
+account_key_test = config('account_key_test')
+CONTAINER_NAME_test = config('CONTAINER_NAME_test')
+
+
+# authorize with azure
+def auth():
+    url = "https://login.windows.net/" + azure_tenant + "/oauth2/token"
+    data = "resource=https%3A%2F%2Fmanagement.core.windows.net%2F&client_id=" + azure_client_id + "&grant_type=client_credentials&client_secret=" + azure_secret
+    headers = {'Content-Type': 'application/x-www-form-urlencoded'}
+    response = requests.post(url, data=data, headers=headers)
+    return response
+
+
+# Generate SAS token and get the VA excel file
+def get_va(database_name, account_name, account_key, container_name, resource_group_name, server_name):
+    # Generate SAS token
+    block_blob_service = BlockBlobService(account_name=account_name, account_key=account_key)
+    sas_url = block_blob_service.generate_container_shared_access_signature(
+        container_name,
+        ContainerPermissions(read=True, write=True),
+        datetime.now() + timedelta(days=5.0),
+    )
+    # Get the VA using the SAS token and Bearer token from the auth() function
+    newurl = "https://management.azure.com/subscriptions/" + azure_subscription_id + "/resourceGroups/" + resource_group_name + "/providers/Microsoft.Sql/servers/" + server_name + "/databases/" + database_name + "/vulnerabilityAssessments/default/scans?api-version=2020-11-01-preview"
+    headers_data = {'Authorization': 'Bearer ' + auth().json()['access_token'], 'Content-Type': 'application/json'}
+    response = requests.get(newurl, headers=headers_data)
+    data = response.json()
+    json_data = data['value'][-1]['properties']['storageContainerPath']
+    xlsx_data = json_data.replace("json", "xlsx")
+    return xlsx_data + '?' + sas_url
+
+
+if __name__ == '__main__':
+    ixnamsdev = get_va(databaseName_ix, account_name_ix, account_key_ix, CONTAINER_NAME_ix, resourceGroupName, serverName)
+    namsdev = get_va(databaseName_nams, account_name_nams, account_key_nams, CONTAINER_NAME_nams, resourceGroupName, serverName)
+    prod = get_va(databaseName_prod, account_name_prod, account_key_prod, CONTAINER_NAME_prod, resourceGroupName_prod_test, serverName_prod)
+    test = get_va(databaseName_test, account_name_test, account_key_test, CONTAINER_NAME_test, resourceGroupName_prod_test, serverName_test)
+    print('ixnamsdev = ', ixnamsdev)
+    print('namsdev = ', namsdev)
+    print('prod = ', prod)
+    print('test = ', test)
